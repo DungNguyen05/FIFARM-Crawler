@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from urllib.parse import urlparse
 import aiohttp
+import schedule
+import threading
+import time
 
 # Configuration Constants
 API_ENDPOINT = "http://localhost:8080/admin/news-articles"
@@ -17,6 +20,7 @@ class Coin98ArticleCrawler:
         self.run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, word_count_threshold=50)
         self.home_url = HOME_URL
         self.api_endpoint = API_ENDPOINT
+        self.is_running = False
         
     async def get_article_links(self):
         """Get all article links from homepage"""
@@ -232,36 +236,99 @@ class Coin98ArticleCrawler:
                 return False
 
     async def run_workflow(self, max_articles=MAX_ARTICLES):
-        
-        # Get article links
-        article_links = await self.get_article_links()
-        if not article_links:
-            print("❌ No articles found")
+        """Single crawl workflow"""
+        if self.is_running:
+            print("⚠️ Crawl already in progress, skipping...")
             return
-        
-        if max_articles:
-            article_links = article_links[:max_articles]
-        
-        print(f"📰 Found {len(article_links)} articles to crawl")
-        
-        # Crawl articles
-        successful_count = 0
-        for i, url in enumerate(article_links, 1):
-            print(f"[{i}/{len(article_links)}] Crawling...")
-            article_data = await self.crawl_article(url)
             
-            if article_data:
-                success = await self.send_to_api(article_data)
-                if success:
-                    successful_count += 1
+        self.is_running = True
+        try:
+            # Get article links
+            article_links = await self.get_article_links()
+            if not article_links:
+                print("❌ No articles found")
+                return
             
-            await asyncio.sleep(1)
+            if max_articles:
+                article_links = article_links[:max_articles]
+            
+            print(f"📰 Found {len(article_links)} articles to crawl")
+            
+            # Crawl articles
+            successful_count = 0
+            for i, url in enumerate(article_links, 1):
+                print(f"[{i}/{len(article_links)}] Crawling...")
+                article_data = await self.crawl_article(url)
+                
+                if article_data:
+                    success = await self.send_to_api(article_data)
+                    if success:
+                        successful_count += 1
+                
+                await asyncio.sleep(1)
+            
+            print(f"✅ Completed! Successfully sent {successful_count}/{len(article_links)} articles")
+        finally:
+            self.is_running = False
+
+    # NEW: Schedule-based methods
+    def scheduled_crawl(self):
+        """Wrapper for scheduled crawl (sync)"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\n⏰ [{current_time}] Scheduled crawl starting...")
         
-        print(f"✅ Completed! Successfully sent {successful_count}/{len(article_links)} articles")
+        # Run async function in new event loop
+        asyncio.run(self.run_workflow(max_articles=MAX_ARTICLES))
+
+    def start_scheduler(self):
+        """Start the scheduler in a separate thread"""
+        # Schedule crawl every hour
+        # schedule.every().hour.do(self.scheduled_crawl)
+        
+        # Or schedule at specific times:
+        # schedule.every().hour.at(":00").do(self.scheduled_crawl)  # Every hour at :00
+        # schedule.every().day.at("09:00").do(self.scheduled_crawl)  # Daily at 9 AM
+        schedule.every(2).minutes.do(self.scheduled_crawl)  # Every 30 minutes
+        
+        print("📅 Scheduler started - crawling every hour")
+        print("🚀 Running initial crawl...")
+        self.scheduled_crawl()  # Run immediately on start
+        
+        # Keep the scheduler running
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+
+def run_with_scheduler():
+    """Run crawler with schedule library"""
+    crawler = Coin98ArticleCrawler()
+    
+    # Start scheduler in a thread so it doesn't block
+    scheduler_thread = threading.Thread(target=crawler.start_scheduler, daemon=True)
+    scheduler_thread.start()
+    
+    try:
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n🛑 Scheduler stopped by user")
 
 async def main():
     crawler = Coin98ArticleCrawler()
-    await crawler.run_workflow(max_articles=MAX_ARTICLES)
+    
+    # Option 1: Run once
+    # await crawler.run_workflow(max_articles=MAX_ARTICLES)
+    
+    # Option 2: Use scheduler (uncomment below and comment above)
+    # run_with_scheduler()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Choose your method:
+    
+    # Method 1: Run with asyncio scheduler
+    # asyncio.run(main())
+    
+    # Method 2: Run with schedule library
+    run_with_scheduler()
+
