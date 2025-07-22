@@ -99,8 +99,6 @@ LOG_LEVEL=INFO
 
 ## 🚀 Chạy crawler
 
-### Chạy một lần để test
-
 ```bash
 python main.py
 ```
