@@ -192,7 +192,7 @@ class TapchiBitcoinCrawler:
             else:
                 logger.warning("Could not find div with class 'the_content'")
                 # Fallback to full markdown if the_content div is not found
-                return result.markdown if hasattr(result, 'markdown') else ""
+                return ""
                 
         except Exception as e:
             logger.error(f"Error extracting content from the_content div: {e}")
