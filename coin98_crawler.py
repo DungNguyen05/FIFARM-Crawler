@@ -7,51 +7,24 @@ from datetime import datetime, timezone
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from urllib.parse import urlparse
 import aiohttp
-import schedule
-import threading
-import time
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Configuration from .env file
-API_ENDPOINT = os.getenv("API_ENDPOINT", "http://localhost:8080/admin/news-articles")
-HOME_URL = os.getenv("HOME_URL", "https://coin98.net/home/moi-nhat")
-MAX_ARTICLES = int(os.getenv("MAX_ARTICLES", "5"))
-
-# Timing Configuration
-SCHEDULE_TYPE = os.getenv("SCHEDULE_TYPE", "interval")  # interval, daily, hourly, custom
-INTERVAL_MINUTES = int(os.getenv("INTERVAL_MINUTES", "60"))  # For interval mode
-DAILY_TIME = os.getenv("DAILY_TIME", "09:00")  # For daily mode (HH:MM format)
-CUSTOM_TIMES = os.getenv("CUSTOM_TIMES", "06:00,12:00,18:00")  # Comma separated times
-RUN_IMMEDIATELY = os.getenv("RUN_IMMEDIATELY", "true").lower() == "true"
-
-# Logging Configuration
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FILE = os.getenv("LOG_FILE", "crawler.log")
-
-# Setup logging
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 class Coin98ArticleCrawler:
     def __init__(self):
         self.browser_config = BrowserConfig(headless=True, verbose=False)
         self.run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, word_count_threshold=50)
-        self.home_url = HOME_URL
-        self.api_endpoint = API_ENDPOINT
+        self.home_url = os.getenv("COIN98_HOME_URL", "https://coin98.net/home/moi-nhat")
+        self.api_endpoint = os.getenv("COIN98_API_ENDPOINT", os.getenv("API_ENDPOINT", "http://localhost:8080/admin/news-articles"))
+        self.max_articles = int(os.getenv("COIN98_MAX_ARTICLES", os.getenv("MAX_ARTICLES", "5")))
         self.is_running = False
         
-        logger.info(f"Crawler initialized - API: {self.api_endpoint}")
-        logger.info(f"Schedule Type: {SCHEDULE_TYPE}")
+        logger.info(f"Coin98 Crawler initialized - URL: {self.home_url}")
+        logger.info(f"Coin98 API: {self.api_endpoint}")
         
     async def get_article_links(self):
         """Get all article links from homepage"""
@@ -60,7 +33,7 @@ class Coin98ArticleCrawler:
                 result = await crawler.arun(url=self.home_url, config=self.run_config)
                 
                 if not result.success:
-                    logger.error("Failed to crawl homepage")
+                    logger.error("Failed to crawl Coin98 homepage")
                     return []
                 
                 internal_links = []
@@ -70,10 +43,10 @@ class Coin98ArticleCrawler:
                         internal_links.append(href)
                 
                 unique_links = list(set(internal_links))
-                logger.info(f"Found {len(unique_links)} article links")
+                logger.info(f"Coin98: Found {len(unique_links)} article links")
                 return unique_links
         except Exception as e:
-            logger.error(f"Error getting article links: {e}")
+            logger.error(f"Coin98: Error getting article links: {e}")
             return []
     
     def is_article_link(self, url):
@@ -98,10 +71,10 @@ class Coin98ArticleCrawler:
                 if result.success:
                     return self.extract_article_data(url, result)
                 else:
-                    logger.warning(f"Failed to crawl: {url}")
+                    logger.warning(f"Coin98: Failed to crawl: {url}")
                     return None
         except Exception as e:
-            logger.error(f"Error crawling {url}: {e}")
+            logger.error(f"Coin98: Error crawling {url}: {e}")
             return None
     
     def extract_article_data(self, url, result):
@@ -269,40 +242,39 @@ class Coin98ArticleCrawler:
             try:
                 async with session.post(self.api_endpoint, json=data) as response:
                     response.raise_for_status()
-                    logger.info(f"✅ Sent: {data.get('title', 'Untitled')[:50]}...")
+                    logger.info(f"Coin98 ✅ Sent: {data.get('title', 'Untitled')[:50]}...")
                     return True
             except Exception as e:
-                logger.error(f"❌ API Error: {e}")
+                logger.error(f"Coin98 ❌ API Error: {e}")
                 return False
 
-    async def run_workflow(self, max_articles=None):
+    async def run_workflow(self):
         """Single crawl workflow"""
         if self.is_running:
-            logger.warning("⚠️ Crawl already in progress, skipping...")
+            logger.warning("Coin98 ⚠️ Crawl already in progress, skipping...")
             return
             
         self.is_running = True
         start_time = datetime.now()
         
         try:
-            logger.info("🚀 Starting crawl workflow...")
+            logger.info("Coin98 🚀 Starting crawl workflow...")
             
             # Get article links
             article_links = await self.get_article_links()
             if not article_links:
-                logger.error("❌ No articles found")
+                logger.error("Coin98 ❌ No articles found")
                 return
             
-            if max_articles or MAX_ARTICLES:
-                limit = max_articles or MAX_ARTICLES
-                article_links = article_links[:limit]
+            if self.max_articles:
+                article_links = article_links[:self.max_articles]
             
-            logger.info(f"📰 Processing {len(article_links)} articles")
+            logger.info(f"Coin98 📰 Processing {len(article_links)} articles")
             
             # Crawl articles
             successful_count = 0
             for i, url in enumerate(article_links, 1):
-                logger.info(f"[{i}/{len(article_links)}] Crawling: {url}")
+                logger.info(f"Coin98 [{i}/{len(article_links)}] Crawling: {url}")
                 article_data = await self.crawl_article(url)
                 
                 if article_data:
@@ -315,80 +287,9 @@ class Coin98ArticleCrawler:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
-            logger.info(f"✅ Crawl completed in {duration:.1f}s - Success: {successful_count}/{len(article_links)} articles")
+            logger.info(f"Coin98 ✅ Completed in {duration:.1f}s - Success: {successful_count}/{len(article_links)} articles")
             
         except Exception as e:
-            logger.error(f"❌ Workflow error: {e}")
+            logger.error(f"Coin98 ❌ Workflow error: {e}")
         finally:
             self.is_running = False
-
-    def scheduled_crawl(self):
-        """Wrapper for scheduled crawl (sync)"""
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        logger.info(f"\n⏰ [{current_time}] Scheduled crawl starting...")
-        
-        # Run async function in new event loop
-        asyncio.run(self.run_workflow())
-
-    def setup_schedule(self):
-        """Setup scheduler based on configuration"""
-        if SCHEDULE_TYPE == "interval":
-            if INTERVAL_MINUTES >= 60:
-                hours = INTERVAL_MINUTES // 60
-                schedule.every(hours).hours.do(self.scheduled_crawl)
-                logger.info(f"📅 Scheduled every {hours} hour(s)")
-            else:
-                schedule.every(INTERVAL_MINUTES).minutes.do(self.scheduled_crawl)
-                logger.info(f"📅 Scheduled every {INTERVAL_MINUTES} minute(s)")
-                
-        elif SCHEDULE_TYPE == "daily":
-            schedule.every().day.at(DAILY_TIME).do(self.scheduled_crawl)
-            logger.info(f"📅 Scheduled daily at {DAILY_TIME}")
-            
-        elif SCHEDULE_TYPE == "hourly":
-            schedule.every().hour.do(self.scheduled_crawl)
-            logger.info("📅 Scheduled every hour")
-            
-        elif SCHEDULE_TYPE == "custom":
-            times = [time.strip() for time in CUSTOM_TIMES.split(',')]
-            for time_str in times:
-                if ':' in time_str:
-                    schedule.every().day.at(time_str).do(self.scheduled_crawl)
-                    logger.info(f"📅 Scheduled daily at {time_str}")
-        
-        else:
-            logger.error(f"❌ Invalid SCHEDULE_TYPE: {SCHEDULE_TYPE}")
-            return False
-            
-        return True
-
-    def start_scheduler(self):
-        """Start the scheduler"""
-        if not self.setup_schedule():
-            return
-            
-        # Run immediately if configured
-        if RUN_IMMEDIATELY:
-            logger.info("🚀 Running initial crawl...")
-            self.scheduled_crawl()
-        
-        # Keep the scheduler running
-        logger.info("🔄 Scheduler is running... Press Ctrl+C to stop")
-        try:
-            while True:
-                schedule.run_pending()
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("🛑 Scheduler stopped by user")
-
-def main():
-    """Main function"""
-    logger.info("=" * 50)
-    logger.info("🚀 Coin98 Article Crawler Starting...")
-    logger.info("=" * 50)
-    
-    crawler = Coin98ArticleCrawler()
-    crawler.start_scheduler()
-
-if __name__ == "__main__":
-    main()
